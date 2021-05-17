@@ -7,7 +7,8 @@ LUA_FILE=$LOCATION/icosium.lua
 
 if [[ -f $CONF_FILE && -f $LUA_FILE ]]; then
     killall conky &> /dev/null
-    conky -c "$CONF_FILE"
+    cd "$LOCATION" && conky -c "$CONF_FILE" &
 else
     echo "Error. '$CONF_FILE' doesn't exist"
+    exit 1
 fi

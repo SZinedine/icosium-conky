@@ -31,7 +31,7 @@
 --    | |  ______________________________      |                       |   |     |           Download:    0B    325Mib
 --    |*|  |.                            |     |                       |   |     |           Upload:      0B    44Mib
 --    | |  |.                            |     |                       |   |     |         Battery:  97%
---    | |  |.                            |     |                       |   |     |         
+--    | |  |.                            |     |                       |   |     |
 --    | |  |_____________________________|     |                       |   |     |
 --    | |                                      |. . . . . . . . . . . .|   |     |
 --    | |  ______________________________      |                       |   |     |
@@ -52,6 +52,7 @@ number_processes_todisplay = 9  -- number of processes to display under the CPU 
 display_cpu_titles = true
 display_mem_titles = true
 font = "Mono"
+public_ip_refresh_rate = 60     -- seconds
 -------------------------------
 
 
@@ -60,28 +61,28 @@ if THEME == "blue dark" then
     color0 = 0xA6A6A6   -- background of widgets
     color1 = 0x5594FF   -- foreground of widgets (main color of progression bars)
     color2 = 0x1D1D1D   -- second color
-    color3 = 0xFF9000   -- fireground modifier: warning color 
+    color3 = 0xFF9000   -- fireground modifier: warning color
     color4 = 0xFF0000   -- fireground modifier: danger color
     color5 = 0xD1CDD5   -- text color
 elseif THEME == "blue light" then
     color0 = 0x252525   -- background of widgets
     color1 = 0x3A83FF   -- foreground of widgets (main color of progression bars)
     color2 = 0x1D1D1D   -- second color
-    color3 = 0xFF9000   -- fireground modifier: warning color 
+    color3 = 0xFF9000   -- fireground modifier: warning color
     color4 = 0xFF0000   -- fireground modifier: danger color
     color5 = 0x1D1D1D   -- text color
 elseif THEME == "monochrome dark" then    -- monochrome dark
     color0 = 0x484848   -- background of widgets
     color1 = 0xDEDEDE   -- foreground of widgets (main color of progression bars)
     color2 = 0x1D1D1D   -- second color
-    color3 = color1     -- fireground modifier: warning color 
+    color3 = color1     -- fireground modifier: warning color
     color4 = 0xFF0000   -- fireground modifier: danger color
     color5 = 0xDEDEDE   -- text color
 elseif THEME == "monochrome light" then    -- monochrome dark
     color0 = 0x252525   -- background of widgets
     color1 = 0x151515   -- foreground of widgets (main color of progression bars)
     color2 = 0x1D1D1D   -- second color
-    color3 = color1     -- fireground modifier: warning color 
+    color3 = color1     -- fireground modifier: warning color
     color4 = 0xFF0000   -- fireground modifier: danger color
     color5 = 0x1D1D1D   -- text color
 end
@@ -147,16 +148,16 @@ date_x = clock_x + 20
 date_y = clock_y+40
 date_font_size = 25
 
-if conky_parse("battery_percent") == nil then 
-    has_battery = false
-else has_battery = true
-end
+has_battery = conky_parse("${battery_percent}") ~= nil
+has_second_battery = conky_parse("${battery_percent BAT1}") ~= nil
+public_ip = nil
+
 
 function conky_main()
     if conky_window == nil then
         return
-    elseif general_fg == nil then
-        print("Icoiusm Conky: Fatal Error. Please define a theme")
+    elseif general_fg == nil or general_bg == nil then
+        print("Icosium Conky: Fatal Error. Please define a theme")
     end
     local cs = cairo_xlib_surface_create(conky_window.display,
                                          conky_window.drawable,
@@ -169,7 +170,13 @@ function conky_main()
     if updates > 5 then
         draw_rectangles()
         draw_text()
+
+        -- check the ip adress every x seconds (check the variable public_ip_refresh_rate)
+        if public_ip == nil or public_ip == "None" or (updates%public_ip_refresh_rate) == 0 then
+            public_ip = get_public_ip()
+        end
     end
+
 
     cairo_destroy(cr)
     cairo_surface_destroy(cs)
@@ -204,22 +211,39 @@ end
 function write_info(x, y, interval, color, font_size)
     -- fetch important system info and display them line by line
 
+    local function discharging_battery()
+        -- check if the battery is discharging or not
+        local bat0 = parse("battery BAT0")
+        local bat1 = parse("battery BAT1")
+        if has_battery == false then return false end
+        if bat0 ~= nil and string.match(bat0, "discharging") then return true end
+        if bat1 ~= nil and string.match(bat1, "discharging") then return true end
+        return false
+    end
+
     local function draw_battery_textinfo(x, y)
         -- a colored battery indicator
-        local batperc_str = parse("battery_percent")
-        local batperc_num = tonumber(batperc_str)
-        local str = string.format("Battery: %s%s", batperc_str, "%")
+        local batperc_num = tonumber(parse("battery_percent"))
+        if has_second_battery then
+            batperc_num = math.floor((batperc_num + tonumber(parse("battery_percent BAT1")))/2)
+        end
+
         local batperc_color = color
-        if batperc_num >= 40 then 
+        if batperc_num >= 40 then
             batperc_color = color
-        elseif batperc_num >= 20 then 
+        elseif batperc_num >= 20 then
             batperc_color = color_warning
-        elseif batperc_num >= 0 then 
+        elseif batperc_num >= 0 then
             batperc_color = color_danger
         end
 
+        local str = string.format("Battery: %s%s", batperc_num, "%")
+        if (discharging_battery()) then
+            str = str .. " (discharging)"
+        end
         write(x, y, str, batperc_color, font_size)
     end
+
 
     local textinfo_str = {
         string.format("CPU:     %s%s", parse("cpu"), "%"),
@@ -234,17 +258,18 @@ function write_info(x, y, interval, color, font_size)
         "Internet",
         string.format("  SSID:        \"%s\"", parse("wireless_essid " .. net_interface)),
         string.format("  Wifi Signal: %s%s", parse("wireless_link_qual_perc " .. net_interface), "%"),
+        string.format("  Public IP:   %s", public_ip),
         string.format("  Local IP:    %s", parse("addr " .. net_interface)),
         string.format("  Download:    %s    %s", parse("downspeed " .. net_interface), parse("totaldown " .. net_interface)),
         string.format("  Upload:      %s    %s", parse("upspeed " .. net_interface), parse("totalup " .. net_interface)),
     }
 
     local yy = y + interval
-    for i in pairs(textinfo_str) do 
+    for i in pairs(textinfo_str) do
         write(x, yy, textinfo_str[i], color, font_size)
         yy = yy + interval
     end
-    
+
     if has_battery then
         draw_battery_textinfo(x, yy)
     end
@@ -283,7 +308,7 @@ end
 function draw_vertical_rectangle(x, y, w, h, toparse, max_value)
     local value = tonumber(parse(toparse))
     local color_current = get_color_from_perc(value)
-    
+
     cairo_set_source_rgba(cr, rgb_to_r_g_b(general_bg, general_bg_alpha))
     cairo_rectangle(cr, x, y, w, -h)
     cairo_fill(cr)
@@ -360,6 +385,17 @@ function write_list_proccesses_mem(x, y, interval, color, font_size)
 end
 
 
+function get_public_ip()
+    local po = io.popen("wget http://ipinfo.io/ip -qO -")
+    local content = po:read("*a")
+    if content == "" or content == nil then
+        return "None"
+    else
+        return content
+    end
+end
+
+
 function parse(str)
     -- convinience function
     return conky_parse(string.format("${%s}", str))
@@ -369,13 +405,13 @@ end
 function get_color_from_perc(perc)
     -- return a color according to the provided value
     local color_current = color_normal
-    
+
     if perc > threshold_danger then
         color_current = color_danger
     elseif perc > threshold_warning then
         color_current = color_warning
     end
-    
+
     return color_current
 end
 
